@@ -71,6 +71,21 @@ DAILY_API_KEY=your_daily_api_key
 
 ## Usage
 
+### Web Interface
+
+Start the web server:
+```bash
+python server.py
+```
+
+Then open your browser to `http://localhost:5000` to access the interactive web interface.
+
+The web interface provides:
+- Real-time voice conversation controls
+- Visual audio feedback
+- Message history
+- Configurable LLM and TTS settings
+
 ### Basic Voice Bot Example
 
 ```python
@@ -99,6 +114,11 @@ pipcat/
 ├── README.md
 ├── requirements.txt
 ├── .env.example
+├── server.py           # Flask backend
+├── web/                # Web interface
+│   ├── index.html      # Main UI
+│   ├── styles.css      # Styling
+│   └── app.js          # Frontend logic
 ├── examples/
 │   ├── basic_chatbot.py
 │   ├── voice_assistant.py

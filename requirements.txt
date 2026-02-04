@@ -1,0 +1,45 @@
+# Core Pipcat Framework
+pipecat-ai>=0.0.1
+
+# Web Server
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Async support
+aiohttp>=3.9.0
+
+# LLM Service Providers
+openai>=1.0.0
+anthropic>=0.18.0
+
+# Speech-to-Text (STT) Services
+deepgram-sdk>=3.0.0
+
+# Text-to-Speech (TTS) Services
+elevenlabs>=0.2.0
+
+# WebRTC and Transport
+daily-python>=0.9.0
+
+# Voice Activity Detection
+torch>=2.0.0  # Required for Silero VAD
+torchaudio>=2.0.0
+onnxruntime>=1.16.0
+
+# Audio Processing
+numpy>=1.24.0
+soundfile>=0.12.0
+
+# Logging and Debugging
+loguru>=0.7.0
+
+# Testing (optional)
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Code Quality (optional)
+black>=23.0.0
+flake8>=6.0.0

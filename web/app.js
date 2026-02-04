@@ -11,7 +11,14 @@ const state = {
     recordedAudio: null,
     isRecordingAudio: false,
     recordStartTime: null,
-    recordTimerInterval: null
+    recordTimerInterval: null,
+    // Voice capture state
+    voiceStream: null,
+    voiceAudioContext: null,
+    voiceAnalyser: null,
+    voiceMediaRecorder: null,
+    voiceChunks: [],
+    voiceVisualizerInterval: null
 };
 
 // DOM Elements
@@ -100,7 +107,14 @@ async function startConversation() {
 // Stop Conversation
 function stopConversation() {
     state.isConnected = false;
-    state.isRecording = false;
+    
+    // Stop voice capture if active
+    if (state.isRecording) {
+        stopVoiceCapture();
+    }
+    
+    // Cleanup all resources
+    cleanupVoiceCapture();
 
     updateStatus('ready', 'Ready');
     startBtn.disabled = false;
@@ -109,48 +123,254 @@ function stopConversation() {
     micBtn.classList.remove('active');
 }
 
-// Toggle Microphone
-function toggleMicrophone() {
+// Toggle Microphone - Capture User Voice
+async function toggleMicrophone() {
     if (!state.isConnected) {
         alert('Please start a conversation first');
         return;
     }
 
-    state.isRecording = !state.isRecording;
-
-    if (state.isRecording) {
-        micBtn.classList.add('active');
-        updateStatus('connected', 'Listening...');
-        visualizer.classList.add('active');
-
-        // Simulate voice input
-        setTimeout(() => {
-            if (state.isRecording) {
-                stopRecording();
-            }
-        }, 3000);
+    if (!state.isRecording) {
+        await startVoiceCapture();
     } else {
-        stopRecording();
+        await stopVoiceCapture();
     }
 }
 
-function stopRecording() {
-    state.isRecording = false;
-    micBtn.classList.remove('active');
-    updateStatus('connected', 'Connected');
-    visualizer.classList.remove('active');
+// Start capturing user voice
+async function startVoiceCapture() {
+    try {
+        // Request microphone access
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                sampleRate: 44100
+            } 
+        });
+        
+        state.voiceStream = stream;
+        state.isRecording = true;
+        
+        // Create audio context for visualization
+        state.voiceAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+        state.voiceAnalyser = state.voiceAudioContext.createAnalyser();
+        const source = state.voiceAudioContext.createMediaStreamSource(stream);
+        
+        state.voiceAnalyser.fftSize = 256;
+        state.voiceAnalyser.smoothingTimeConstant = 0.8;
+        source.connect(state.voiceAnalyser);
+        
+        // Initialize MediaRecorder for audio capture
+        state.voiceMediaRecorder = new MediaRecorder(stream, {
+            mimeType: 'audio/webm;codecs=opus'
+        });
+        state.voiceChunks = [];
+        
+        state.voiceMediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                state.voiceChunks.push(event.data);
+            }
+        };
+        
+        state.voiceMediaRecorder.onstop = () => {
+            // Process captured audio
+            processCapturedAudio();
+        };
+        
+        // Start recording
+        state.voiceMediaRecorder.start();
+        
+        // Update UI
+        micBtn.classList.add('active');
+        updateStatus('connected', 'Listening...');
+        visualizer.classList.add('active');
+        
+        // Start visualizer animation
+        startVoiceVisualizer();
+        
+        console.log('Voice capture started');
+        
+    } catch (error) {
+        console.error('Voice capture error:', error);
+        state.isRecording = false;
+        
+        if (error.name === 'NotAllowedError') {
+            alert('Microphone access denied. Please allow microphone access in your browser settings.');
+        } else if (error.name === 'NotFoundError') {
+            alert('No microphone found. Please connect a microphone and try again.');
+        } else {
+            alert('Failed to access microphone: ' + error.message);
+        }
+    }
+}
 
-    // Simulate user message
-    addMessage('user', 'How does Pipcat work?');
+// Stop capturing user voice
+async function stopVoiceCapture() {
+    try {
+        state.isRecording = false;
+        
+        // Stop MediaRecorder
+        if (state.voiceMediaRecorder && state.voiceMediaRecorder.state !== 'inactive') {
+            state.voiceMediaRecorder.stop();
+        }
+        
+        // Stop visualizer
+        stopVoiceVisualizer();
+        
+        // Update UI
+        micBtn.classList.remove('active');
+        updateStatus('connected', 'Processing...');
+        visualizer.classList.remove('active');
+        
+        // Stop audio stream (will be stopped after processing)
+        console.log('Voice capture stopped');
+        
+    } catch (error) {
+        console.error('Error stopping voice capture:', error);
+        cleanupVoiceCapture();
+    }
+}
 
-    // Simulate AI response
-    setTimeout(() => {
+// Process captured audio
+function processCapturedAudio() {
+    if (state.voiceChunks.length === 0) {
+        console.warn('No audio data captured');
+        cleanupVoiceCapture();
+        updateStatus('connected', 'Connected');
+        return;
+    }
+    
+    // Create audio blob
+    const audioBlob = new Blob(state.voiceChunks, { type: 'audio/webm;codecs=opus' });
+    
+    // Here you would send the audio to your backend/STT service
+    // For now, we'll simulate processing
+    console.log('Audio captured:', audioBlob.size, 'bytes');
+    
+    // Simulate sending to backend
+    sendAudioToBackend(audioBlob);
+    
+    // Cleanup
+    cleanupVoiceCapture();
+}
+
+// Send audio to backend for processing
+async function sendAudioToBackend(audioBlob) {
+    try {
+        // Create FormData to send audio file
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'voice-recording.webm');
+        formData.append('format', 'webm');
+        
+        // Send to backend API
+        const response = await fetch('/api/message', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to process audio');
+        }
+        
+        const data = await response.json();
+        
+        // Display user message (transcribed text)
+        if (data.transcript) {
+            addMessage('user', data.transcript);
+        } else {
+            addMessage('user', '[Voice message]');
+        }
+        
+        // Display AI response
+        if (data.reply) {
+            showTypingIndicator();
+            setTimeout(() => {
+                hideTypingIndicator();
+                addMessage('assistant', data.reply);
+                updateStatus('connected', 'Connected');
+            }, 1000);
+        } else {
+            updateStatus('connected', 'Connected');
+        }
+        
+    } catch (error) {
+        console.error('Error sending audio to backend:', error);
+        
+        // Fallback: show a message that audio was captured
+        addMessage('user', '[Voice message captured]');
         showTypingIndicator();
         setTimeout(() => {
             hideTypingIndicator();
-            addMessage('assistant', 'Pipcat is a powerful framework that helps you build real-time voice and multimodal AI applications. It provides a simple pipeline architecture for integrating STT, LLMs, and TTS services.');
-        }, 2000);
-    }, 500);
+            addMessage('assistant', 'I received your voice message. Audio processing is being set up.');
+            updateStatus('connected', 'Connected');
+        }, 1000);
+    }
+}
+
+// Start voice visualizer animation
+function startVoiceVisualizer() {
+    if (state.voiceVisualizerInterval) {
+        clearInterval(state.voiceVisualizerInterval);
+    }
+    
+    const waveBars = visualizer.querySelectorAll('.wave-bar');
+    
+    state.voiceVisualizerInterval = setInterval(() => {
+        if (!state.isRecording || !state.voiceAnalyser) {
+            stopVoiceVisualizer();
+            return;
+        }
+        
+        const dataArray = new Uint8Array(state.voiceAnalyser.frequencyBinCount);
+        state.voiceAnalyser.getByteFrequencyData(dataArray);
+        
+        // Update wave bars based on audio levels
+        waveBars.forEach((bar, index) => {
+            const frequencyIndex = Math.floor((index / waveBars.length) * dataArray.length);
+            const value = dataArray[frequencyIndex] || 0;
+            const height = 20 + (value / 255) * 60; // Scale from 20px to 80px
+            bar.style.height = height + 'px';
+        });
+    }, 100);
+}
+
+// Stop voice visualizer animation
+function stopVoiceVisualizer() {
+    if (state.voiceVisualizerInterval) {
+        clearInterval(state.voiceVisualizerInterval);
+        state.voiceVisualizerInterval = null;
+    }
+    
+    // Reset wave bars
+    const waveBars = visualizer.querySelectorAll('.wave-bar');
+    waveBars.forEach(bar => {
+        bar.style.height = '20px';
+    });
+}
+
+// Cleanup voice capture resources
+function cleanupVoiceCapture() {
+    // Stop audio stream
+    if (state.voiceStream) {
+        state.voiceStream.getTracks().forEach(track => track.stop());
+        state.voiceStream = null;
+    }
+    
+    // Close audio context
+    if (state.voiceAudioContext) {
+        state.voiceAudioContext.close();
+        state.voiceAudioContext = null;
+        state.voiceAnalyser = null;
+    }
+    
+    // Reset MediaRecorder
+    state.voiceMediaRecorder = null;
+    state.voiceChunks = [];
+    
+    // Stop visualizer
+    stopVoiceVisualizer();
 }
 
 // Update Status Badge
